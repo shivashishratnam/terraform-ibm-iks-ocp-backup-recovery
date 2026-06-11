@@ -314,15 +314,39 @@
                     "hcl"
                   ]
                 }
-              }
+              },
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "notEqual",
+                  "value": "connected_component"
+                }
+              ]
             },
             {
               "key": "enable_auto_protect",
-              "display_name": "Enable Auto-Protect"
+              "display_name": "Enable Auto-Protect",
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "notEqual",
+                  "value": "connected_component"
+                }
+              ]
             },
             {
               "key": "auto_protect_policy_name",
-              "display_name": "Auto-Protect Policy Name"
+              "display_name": "Auto-Protect Policy Name",
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "notEqual",
+                  "value": "connected_component"
+                }
+              ]
             },
             {
               "key": "protection_groups",
@@ -336,7 +360,15 @@
                     "hcl"
                   ]
                 }
-              }
+              },
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "notEqual",
+                  "value": "connected_component"
+                }
+              ]
             },
             {
               "key": "dsc_helm_timeout",
@@ -380,6 +412,7 @@
               "key": "deployment_scenario",
               "display_name": "Deployment Scenario",
               "description": "Controls which deployment scenario to activate. 'Backup Only' registers the source cluster and configures protection groups — no target cluster or recovery operations. 'Connected Component' registers both source and target clusters with BRS for cluster connection setup, without triggering any backup or recovery. 'Full Backup and Recovery' performs the complete end-to-end flow: registers clusters, triggers an on-demand backup, waits for completion, and executes a recovery to validate the backup. Default: backup_only",
+              "default": "backup_only",
               "options": [
                 {
                   "displayname": "Backup Only",
