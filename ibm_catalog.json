@@ -377,14 +377,28 @@
               "display_name": "Resource Tags"
             },
             {
-              "key": "enable_recovery",
-              "display_name": "Enable Automatic Recovery Testing",
-              "description": "Enable automatic recovery testing after backup completes. When enabled, the solution will trigger an immediate backup, wait for completion, and then automatically restore the backup to validate data integrity. Default: false"
+              "key": "deployment_scenario",
+              "display_name": "Deployment Scenario",
+              "description": "Controls which deployment scenario to activate. 'Backup Only' registers the source cluster and configures protection groups — no target cluster or recovery operations. 'Connected Component' registers both source and target clusters with BRS for cluster connection setup, without triggering any backup or recovery. 'Full Backup and Recovery' performs the complete end-to-end flow: registers clusters, triggers an on-demand backup, waits for completion, and executes a recovery to validate the backup. Default: backup_only",
+              "options": [
+                {
+                  "displayname": "Backup Only",
+                  "value": "backup_only"
+                },
+                {
+                  "displayname": "Connected Component",
+                  "value": "connected_component"
+                },
+                {
+                  "displayname": "Full Backup and Recovery",
+                  "value": "full_backup_recovery"
+                }
+              ]
             },
             {
               "key": "recovery_type",
               "display_name": "Recovery Type",
-              "description": "Choose the recovery destination: 'Same Cluster' restores namespaces to the original cluster with a prefix (e.g., 'restored-myapp'). 'Cross Cluster' restores to a different target cluster for disaster recovery or migration scenarios. Default: same-cluster",
+              "description": "Choose the recovery destination. 'Same Cluster' restores namespaces to the original cluster with a namespace prefix (e.g., 'restored-myapp'). 'Cross Cluster' restores to a separately registered target cluster for disaster recovery or migration scenarios. Default: same-cluster",
               "options": [
                 {
                   "displayname": "Same Cluster",
@@ -394,42 +408,90 @@
                   "displayname": "Cross Cluster",
                   "value": "cross-cluster"
                 }
+              ],
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "equal",
+                  "value": "full_backup_recovery"
+                }
               ]
             },
             {
               "key": "recovery_namespace_prefix",
               "display_name": "Recovery Namespace Prefix",
-              "description": "Prefix added to namespace names during recovery to avoid conflicts with existing namespaces. For example, 'restored-' will create 'restored-production' from 'production'. This allows you to test recovery without affecting running workloads. Default: 'restored-'"
+              "description": "Prefix added to namespace names during recovery to avoid conflicts with existing namespaces. For example, 'restored-' will create 'restored-production' from 'production'. Default: 'restored-'",
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "equal",
+                  "value": "full_backup_recovery"
+                }
+              ]
             },
             {
               "key": "recovery_protection_group_name",
               "display_name": "Recovery Protection Group Name",
-              "description": "Specify which protection group to recover from. Leave empty to automatically use the first protection group defined in your configuration. This is useful when you have multiple protection groups and want to test recovery of a specific one."
+              "description": "Specify which protection group to recover from. Leave empty to automatically use the first protection group defined in your configuration.",
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "equal",
+                  "value": "full_backup_recovery"
+                }
+              ]
             },
             {
               "key": "recovery_wait_timeout_minutes",
               "display_name": "Recovery Wait Timeout (Minutes)",
-              "description": "Maximum time to wait for the initial backup to complete before triggering recovery. The solution actively polls the backup status during this period. Increase this value for large clusters or slow networks. Valid range: 1-120 minutes. Default: 45 minutes"
+              "description": "Maximum time to wait for the backup to complete before triggering recovery. Increase for large clusters or slow networks. Valid range: 1-120 minutes. Default: 45 minutes",
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "equal",
+                  "value": "full_backup_recovery"
+                }
+              ]
             },
             {
               "key": "recovery_poll_interval_seconds",
               "display_name": "Recovery Poll Interval (Seconds)",
-              "description": "How often to check backup status while waiting for completion. Lower values provide faster detection of completed backups but increase API calls. Valid range: 10-300 seconds. Default: 30 seconds"
+              "description": "How often to check backup status while waiting for completion. Lower values detect completion faster but increase API calls. Valid range: 10-300 seconds. Default: 30 seconds",
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "equal",
+                  "value": "full_backup_recovery"
+                }
+              ]
             },
             {
               "key": "target_cluster_id",
-              "display_name": "Target Cluster (Cross-Cluster Recovery)",
-              "description": "Select the target cluster where backups will be restored for cross-cluster recovery. This cluster must be in the same region as the BRS instance. Required when recovery_type is 'cross-cluster'. The target cluster will be automatically registered with the same BRS instance.",
+              "display_name": "Target (Recovery) Cluster",
+              "description": "The target cluster to register with BRS as the recovery destination. Required for 'Connected Component'. Required for 'Full Backup and Recovery' when 'Recovery Type' is 'Cross Cluster'. The target cluster must be in the same region as the BRS instance.",
               "custom_config": {
                 "type": "cluster_var",
                 "grouping": "deployment",
                 "original_grouping": "deployment"
-              }
+              },
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "notEqual",
+                  "value": "backup_only"
+                }
+              ]
             },
             {
               "key": "target_cluster_resource_group_id",
-              "display_name": "Target Cluster Resource Group (Cross-Cluster)",
-              "description": "Resource group of the target cluster for cross-cluster recovery. Required when recovery_type is 'cross-cluster'. Must have appropriate permissions to access this resource group.",
+              "display_name": "Target Cluster Resource Group",
+              "description": "Resource group of the target cluster. Required for 'Connected Component'. Required for 'Full Backup and Recovery' when 'Recovery Type' is 'Cross Cluster'.",
               "custom_config": {
                 "type": "resource_group",
                 "grouping": "deployment",
@@ -437,11 +499,19 @@
                 "config_constraints": {
                   "identifier": "rg_id"
                 }
-              }
+              },
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "notEqual",
+                  "value": "backup_only"
+                }
+              ]
             },
             {
               "key": "target_cluster_config_endpoint_type",
-              "display_name": "Target Cluster Endpoint Type (Cross-Cluster)",
+              "display_name": "Target Cluster Endpoint Type",
               "description": "Endpoint type for accessing the target cluster configuration. 'Private' is recommended for security. 'Default' uses the cluster's default endpoint. 'VPE' and 'Link' are for advanced networking scenarios. Default: private",
               "options": [
                 {
@@ -460,17 +530,41 @@
                   "displayname": "Link",
                   "value": "link"
                 }
+              ],
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "notEqual",
+                  "value": "backup_only"
+                }
               ]
             },
             {
               "key": "target_brs_connection_name",
-              "display_name": "Target BRS Connection Name (Cross-Cluster)",
-              "description": "Custom name for the BRS connection to the target cluster. Leave empty to auto-generate a name based on the cluster ID (format: '{cluster_id}-target-connection'). This connection is used to register the target cluster with the BRS instance."
+              "display_name": "Target BRS Connection Name",
+              "description": "Custom name for the BRS connection to the target cluster. Leave empty to auto-generate a name based on the cluster ID (format: '{cluster_id}-target-connection').",
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "notEqual",
+                  "value": "backup_only"
+                }
+              ]
             },
             {
               "key": "target_create_dsc_worker_pool",
-              "display_name": "Create DSC Worker Pool on Target (Cross-Cluster)",
-              "description": "Create a dedicated worker pool for the Data Source Connector on the target cluster. Recommended for production to isolate backup operations from application workloads. Set to false to deploy DSC on existing worker nodes. Default: true"
+              "display_name": "Create DSC Worker Pool on Target Cluster",
+              "description": "Create a dedicated worker pool for the Data Source Connector on the target cluster. Recommended for production to isolate backup operations from application workloads. Set to false to deploy DSC on existing worker nodes. Default: true",
+              "conditions": [
+                {
+                  "name": "deployment_scenario",
+                  "estype": "terraform",
+                  "operator": "notEqual",
+                  "value": "backup_only"
+                }
+              ]
             }
           ],
           "dependencies": [],

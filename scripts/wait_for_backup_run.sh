@@ -191,7 +191,16 @@ main() {
           '{snapshot_id: $snapshot_id, run_id: $run_id, protection_group_id: $protection_group_id}'
         exit 0
       else
-        echo "No snapshot found yet, waiting ${POLL_INTERVAL_SECONDS}s..." | tee -a "$debug_file" >&2
+        # Fail fast if the latest run is in a terminal failure state rather than waiting for the full timeout
+        local run_status
+        run_status=$(echo "$run_response" | jq -r '.runs[0].status // "unknown"')
+        echo "Latest run status: ${run_status}" | tee -a "$debug_file" >&2
+        if [[ "$run_status" =~ ^(kFailed|kFailure|kCanceled|kMissed|Failed|Canceled|Missed)$ ]]; then
+          echo "ERROR: Latest backup run has status '${run_status}' — failing immediately instead of waiting for the full timeout." >&2
+          echo "Check the IBM Backup & Recovery console for details on why the run failed." >&2
+          exit 1
+        fi
+        echo "No snapshot found yet (run status: ${run_status}), waiting ${POLL_INTERVAL_SECONDS}s..." | tee -a "$debug_file" >&2
       fi
     else
       echo "Protection group not found (404), waiting ${POLL_INTERVAL_SECONDS}s..." | tee -a "$debug_file" >&2

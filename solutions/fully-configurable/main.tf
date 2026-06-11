@@ -75,30 +75,47 @@ module "protect_cluster" {
 
 
 ##############################################################################
-# Recovery Configuration (Optional)
+# Deployment Scenario Locals
+##############################################################################
+
+locals {
+  # Scenario flags — single source of truth for all conditional resources
+  is_backup_only          = var.deployment_scenario == "backup_only"
+  is_connected_component  = var.deployment_scenario == "connected_component"
+  is_full_backup_recovery = var.deployment_scenario == "full_backup_recovery"
+
+  # Target cluster is needed when connecting two clusters (connected_component)
+  # or when doing cross-cluster full recovery.
+  needs_target_cluster = local.is_connected_component || (local.is_full_backup_recovery && var.recovery_type == "cross-cluster")
+
+  # Cross-cluster recovery is a subset of full_backup_recovery
+  is_cross_cluster_recovery = local.is_full_backup_recovery && var.recovery_type == "cross-cluster"
+}
+
+##############################################################################
+# Recovery Configuration (full_backup_recovery scenario only)
 ##############################################################################
 
 locals {
   # Determine which protection group to use for recovery
-  recovery_pg_name = var.enable_recovery ? (
+  recovery_pg_name = local.is_full_backup_recovery ? (
     var.recovery_protection_group_name != null ? var.recovery_protection_group_name :
     try(length(var.protection_groups), 0) > 0 ? var.protection_groups[0].name :
     var.auto_protect_policy_name
   ) : null
 
   # Extract protection group ID for recovery
-  recovery_pg_id = var.enable_recovery && local.recovery_pg_name != null ? (
+  recovery_pg_id = local.is_full_backup_recovery && local.recovery_pg_name != null ? (
     try(split("::", module.protect_cluster.protection_group_ids[local.recovery_pg_name])[1], null)
   ) : null
 }
 
 ##############################################################################
-# Cross-Cluster Recovery: Target Cluster Registration
+# Target Cluster Registration (connected_component + cross-cluster full_backup_recovery)
 ##############################################################################
 
-# Only needed for cross-cluster recovery
 data "ibm_container_vpc_cluster" "target_cluster" {
-  count             = var.enable_recovery && var.recovery_type == "cross-cluster" ? 1 : 0
+  count             = local.needs_target_cluster ? 1 : 0
   name              = var.target_cluster_id
   resource_group_id = var.target_cluster_resource_group_id
   wait_till         = var.wait_till
@@ -108,7 +125,7 @@ data "ibm_container_vpc_cluster" "target_cluster" {
 data "ibm_container_cluster_config" "target_cluster_config" {
   depends_on = [data.ibm_container_vpc_cluster.target_cluster]
 
-  count             = var.enable_recovery && var.recovery_type == "cross-cluster" ? 1 : 0
+  count             = local.needs_target_cluster ? 1 : 0
   cluster_name_id   = var.target_cluster_id
   resource_group_id = var.target_cluster_resource_group_id
   config_dir        = "${path.module}/kubeconfig"
@@ -116,9 +133,9 @@ data "ibm_container_cluster_config" "target_cluster_config" {
   admin             = true
 }
 
-# Register target cluster with BRS for cross-cluster recovery
+# Register target cluster with the same BRS instance as the source cluster
 module "target_cluster_registration" {
-  count  = var.enable_recovery && var.recovery_type == "cross-cluster" ? 1 : 0
+  count  = local.needs_target_cluster ? 1 : 0
   source = "../.."
 
   providers = {
@@ -171,9 +188,9 @@ module "target_cluster_registration" {
   ]
 }
 
-# Wait for target registration to propagate
+# Wait for target registration to propagate before triggering any recovery
 resource "time_sleep" "wait_for_target_registration" {
-  count = var.enable_recovery && var.recovery_type == "cross-cluster" ? 1 : 0
+  count = local.needs_target_cluster ? 1 : 0
 
   depends_on = [module.target_cluster_registration]
 
@@ -181,12 +198,12 @@ resource "time_sleep" "wait_for_target_registration" {
 }
 
 ##############################################################################
-# Immediate Backup Trigger and Completion Polling
+# Immediate Backup Trigger and Completion Polling (full_backup_recovery only)
 ##############################################################################
 
 # Trigger an immediate on-demand backup run for the recovery protection group.
 resource "ibm_backup_recovery_protection_group_run_request" "recovery_backup_run" {
-  count = var.enable_recovery ? 1 : 0
+  count = local.is_full_backup_recovery ? 1 : 0
 
   x_ibm_tenant_id = module.protect_cluster.brs_tenant_id
   group_id        = local.recovery_pg_id
@@ -203,7 +220,7 @@ resource "ibm_backup_recovery_protection_group_run_request" "recovery_backup_run
 
 # Poll for backup completion before attempting recovery
 resource "terraform_data" "wait_for_backup" {
-  count = var.enable_recovery ? 1 : 0
+  count = local.is_full_backup_recovery ? 1 : 0
 
   depends_on = [
     module.protect_cluster,
@@ -237,7 +254,7 @@ resource "terraform_data" "wait_for_backup" {
 ##############################################################################
 
 resource "terraform_data" "same_cluster_recovery" {
-  count = var.enable_recovery && var.recovery_type == "same-cluster" ? 1 : 0
+  count = local.is_full_backup_recovery && var.recovery_type == "same-cluster" ? 1 : 0
 
   input = {
     url              = module.protect_cluster.brs_instance_url
@@ -282,7 +299,7 @@ resource "terraform_data" "same_cluster_recovery" {
 ##############################################################################
 
 resource "terraform_data" "cross_cluster_recovery" {
-  count = var.enable_recovery && var.recovery_type == "cross-cluster" ? 1 : 0
+  count = local.is_cross_cluster_recovery ? 1 : 0
 
   input = {
     url              = module.protect_cluster.brs_instance_url

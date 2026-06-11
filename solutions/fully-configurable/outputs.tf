@@ -43,14 +43,19 @@ output "protection_group_ids" {
 # Recovery Outputs (when enabled)
 ##############################################################################
 
+output "deployment_scenario" {
+  description = "Active deployment scenario: 'backup_only', 'connected_component', or 'full_backup_recovery'."
+  value       = var.deployment_scenario
+}
+
 output "recovery_type" {
-  description = "Type of recovery configured (`same-cluster` or `cross-cluster`)"
-  value       = var.enable_recovery ? var.recovery_type : null
+  description = "Type of recovery configured (`same-cluster` or `cross-cluster`). Null unless `deployment_scenario` is 'full_backup_recovery'."
+  value       = local.is_full_backup_recovery ? var.recovery_type : null
 }
 
 output "recovery_protection_group_name" {
-  description = "Name of the protection group used for recovery"
-  value       = var.enable_recovery ? local.recovery_pg_name : null
+  description = "Name of the protection group used for recovery. Null unless `deployment_scenario` is 'full_backup_recovery'."
+  value       = local.is_full_backup_recovery ? local.recovery_pg_name : null
 }
 
 output "recovery_snapshot_id" {
@@ -60,27 +65,29 @@ output "recovery_snapshot_id" {
 }
 
 output "recovery_namespace_prefix" {
-  description = "Prefix used for recovered namespaces"
-  value       = var.enable_recovery ? var.recovery_namespace_prefix : null
+  description = "Namespace prefix used during recovery. Null unless `deployment_scenario` is 'full_backup_recovery'."
+  value       = local.is_full_backup_recovery ? var.recovery_namespace_prefix : null
 }
 
-# Cross-Cluster Recovery Outputs
+# Target Cluster Outputs (connected_component + cross-cluster full_backup_recovery)
 output "target_cluster_registration_id" {
-  description = "Registration ID of the target cluster (cross-cluster recovery only)"
-  value       = var.enable_recovery && var.recovery_type == "cross-cluster" ? module.target_cluster_registration[0].source_registration_id : null
+  description = "Registration ID of the target cluster in BRS. Present for 'connected_component' and 'full_backup_recovery' with cross-cluster recovery."
+  value       = local.needs_target_cluster ? module.target_cluster_registration[0].source_registration_id : null
 }
 
 output "target_cluster_connection_id" {
-  description = "Connection ID for the target cluster (cross-cluster recovery only)"
-  value       = var.enable_recovery && var.recovery_type == "cross-cluster" ? module.target_cluster_registration[0].connection_id : null
+  description = "Connection ID for the target cluster. Present for 'connected_component' and 'full_backup_recovery' with cross-cluster recovery."
+  value       = local.needs_target_cluster ? module.target_cluster_registration[0].connection_id : null
   sensitive   = true
 }
 
-output "recovery_status" {
-  description = "Status message about recovery configuration"
-  value = var.enable_recovery ? (
+output "deployment_status" {
+  description = "Human-readable summary of the active deployment scenario and what was configured."
+  value = (
+    local.is_backup_only ? "Backup Only: source cluster registered with BRS and protection groups configured. No recovery cluster or recovery operations." :
+    local.is_connected_component ? "Connected Component: source cluster and target cluster '${var.target_cluster_id}' both registered with BRS. No recovery operations triggered." :
     var.recovery_type == "same-cluster" ?
-    "Same-cluster recovery enabled. Namespaces will be restored with prefix '${var.recovery_namespace_prefix}' to the source cluster." :
-    "Cross-cluster recovery enabled. Namespaces will be restored with prefix '${var.recovery_namespace_prefix}' to target cluster '${var.target_cluster_id}'."
-  ) : "Recovery is disabled. Set 'enable_recovery = true' to enable automatic recovery testing."
+    "Full Backup and Recovery (same-cluster): backup triggered and namespaces will be restored with prefix '${var.recovery_namespace_prefix}' on the source cluster." :
+    "Full Backup and Recovery (cross-cluster): backup triggered and namespaces will be restored with prefix '${var.recovery_namespace_prefix}' to target cluster '${var.target_cluster_id}'."
+  )
 }

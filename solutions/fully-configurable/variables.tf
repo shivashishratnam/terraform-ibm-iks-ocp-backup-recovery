@@ -787,18 +787,32 @@ variable "policies" {
 
 
 ##############################################################################
-# Recovery Configuration
+# Deployment Scenario
 ##############################################################################
 
-variable "enable_recovery" {
-  description = "Enable automatic recovery testing after backup completes. When enabled, the solution will wait for a backup to complete and then trigger a recovery operation to validate the backup."
-  type        = bool
-  default     = false
+variable "deployment_scenario" {
+  description = <<-EOT
+    Controls which deployment scenario to activate:
+      - "backup_only"          – Registers the source cluster with BRS and configures protection groups. No target cluster or recovery operations.
+      - "connected_component"  – Registers both source and target clusters with BRS (cluster connection setup only). No backup trigger or recovery execution. Use this for the connected-component use case where cluster registration is managed separately from recovery.
+      - "full_backup_recovery" – Complete end-to-end flow: registers source cluster, optionally registers a target cluster (cross-cluster), triggers an on-demand backup, waits for completion, and executes a recovery operation to validate the backup.
+  EOT
+  type        = string
+  default     = "backup_only"
   nullable    = false
+
+  validation {
+    condition     = contains(["backup_only", "connected_component", "full_backup_recovery"], var.deployment_scenario)
+    error_message = "`deployment_scenario` must be one of: 'backup_only', 'connected_component', or 'full_backup_recovery'."
+  }
 }
 
+##############################################################################
+# Recovery Configuration (applies to full_backup_recovery scenario only)
+##############################################################################
+
 variable "recovery_type" {
-  description = "Type of recovery to perform. 'same-cluster' restores to the original cluster with a namespace prefix. 'cross-cluster' restores to a different target cluster."
+  description = "Type of recovery to perform when `deployment_scenario` is 'full_backup_recovery'. 'same-cluster' restores namespaces to the original cluster with a namespace prefix. 'cross-cluster' restores to a separately registered target cluster."
   type        = string
   default     = "same-cluster"
   nullable    = false
@@ -851,24 +865,30 @@ variable "recovery_poll_interval_seconds" {
 ##############################################################################
 
 variable "target_cluster_id" {
-  description = "Target cluster ID for cross-cluster recovery. Required when `recovery_type` is 'cross-cluster'."
+  description = "ID of the target (recovery) cluster. Required when `deployment_scenario` is 'connected_component' or when `deployment_scenario` is 'full_backup_recovery' with `recovery_type` set to 'cross-cluster'."
   type        = string
   default     = null
 
   validation {
-    condition     = var.recovery_type != "cross-cluster" || var.target_cluster_id != null
-    error_message = "`target_cluster_id` is required when `recovery_type` is 'cross-cluster'."
+    condition = !(
+      var.deployment_scenario == "connected_component" ||
+      (var.deployment_scenario == "full_backup_recovery" && var.recovery_type == "cross-cluster")
+    ) || var.target_cluster_id != null
+    error_message = "`target_cluster_id` is required when `deployment_scenario` is 'connected_component', or when `deployment_scenario` is 'full_backup_recovery' and `recovery_type` is 'cross-cluster'."
   }
 }
 
 variable "target_cluster_resource_group_id" {
-  description = "Target cluster resource group ID for cross-cluster recovery. Required when `recovery_type` is 'cross-cluster'."
+  description = "Resource group ID of the target cluster. Required when `deployment_scenario` is 'connected_component' or when `deployment_scenario` is 'full_backup_recovery' with `recovery_type` set to 'cross-cluster'."
   type        = string
   default     = null
 
   validation {
-    condition     = var.recovery_type != "cross-cluster" || var.target_cluster_resource_group_id != null
-    error_message = "`target_cluster_resource_group_id` is required when `recovery_type` is 'cross-cluster'."
+    condition = !(
+      var.deployment_scenario == "connected_component" ||
+      (var.deployment_scenario == "full_backup_recovery" && var.recovery_type == "cross-cluster")
+    ) || var.target_cluster_resource_group_id != null
+    error_message = "`target_cluster_resource_group_id` is required when `deployment_scenario` is 'connected_component', or when `deployment_scenario` is 'full_backup_recovery' and `recovery_type` is 'cross-cluster'."
   }
 }
 
