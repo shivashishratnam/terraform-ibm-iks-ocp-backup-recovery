@@ -387,12 +387,6 @@ module "source_backup_recovery" {
     }]
   }]
 
-  # Recovery will be handled separately via scripts
-  recovery_mode                    = var.recovery_mode
-  target_cluster_id                = local.target_cluster_id
-  target_cluster_resource_group_id = module.resource_group.resource_group_id
-  recoveries                       = []
-
   resource_tags = var.resource_tags
   access_tags   = var.access_tags
 
@@ -435,9 +429,6 @@ module "target_backup_recovery" {
   # It will use policies from the source cluster's BRS instance
   policies          = []
   protection_groups = []
-
-  # No recovery operations on target cluster
-  recoveries = []
 
   resource_tags = var.resource_tags
   access_tags   = var.access_tags

@@ -54,25 +54,6 @@ output "target_registration_id" {
   value       = module.target_backup_recovery.source_registration_id
 }
 
-output "recovery_ids" {
-  description = "Recovery operation IDs (empty if enable_recovery is false)"
-  value       = module.source_backup_recovery.recovery_ids
-}
-
-output "recovery_status" {
-  description = "Recovery operation status (empty if enable_recovery is false)"
-  value       = module.source_backup_recovery.recovery_status
-}
-
-output "latest_snapshots" {
-  description = "Latest snapshot IDs per protection group (empty if enable_recovery is false)"
-  value       = module.source_backup_recovery.latest_snapshots
-}
-
-output "backup_runs_summary" {
-  description = "Summary of backup runs per protection group (empty if enable_recovery is false)"
-  value       = module.source_backup_recovery.backup_runs_summary
-}
 
 output "source_workload_namespace" {
   description = "Name of the test workload namespace on source cluster"

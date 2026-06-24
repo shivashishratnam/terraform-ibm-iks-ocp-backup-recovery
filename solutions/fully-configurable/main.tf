@@ -54,8 +54,6 @@ module "protect_cluster" {
   add_dsc_rules_to_cluster_sg  = var.add_dsc_rules_to_cluster_sg
   kube_type                    = var.kube_type
   ibmcloud_api_key             = var.ibmcloud_api_key
-  # --- Deployment Mode ---
-  deployment_mode = var.deployment_mode
   # --- BRS Instance Details---
   brs_endpoint_type         = var.brs_endpoint_type
   existing_brs_instance_crn = var.existing_brs_instance_crn
@@ -73,6 +71,7 @@ module "protect_cluster" {
   # --- Data Source Connector (DSC) ---
   dsc_chart_uri           = var.dsc_chart_uri
   dsc_image_version       = var.dsc_image_version
+  dsc_registry            = var.dsc_registry
   dsc_name                = var.dsc_name
   dsc_replicas            = var.dsc_replicas
   dsc_namespace           = var.dsc_namespace
@@ -93,10 +92,6 @@ module "protect_cluster" {
   # --- Resource Tags ---
   resource_tags = var.resource_tags
   access_tags   = var.access_tags
-  # --- Recovery Settings ---
-  recovery_mode                    = var.recovery_type
-  target_cluster_id                = var.target_cluster_id
-  target_cluster_resource_group_id = var.target_cluster_resource_group_id
 }
 
 
@@ -131,7 +126,7 @@ locals {
 locals {
   deploy_target_cluster = (
     var.deployment_mode == "connected_component" ||
-    (var.deployment_mode == "full_backup_recovery" && var.recovery_type == "cross-cluster")
+    (var.deployment_mode == "full_backup_recovery" && var.recovery_mode == "cross-cluster")
   )
 }
 
@@ -184,6 +179,7 @@ module "target_cluster_registration" {
   # DSC configuration for target
   dsc_chart_uri          = var.dsc_chart_uri
   dsc_image_version      = var.dsc_image_version
+  dsc_registry           = var.dsc_registry
   dsc_name               = var.dsc_name
   dsc_replicas           = var.dsc_replicas
   dsc_namespace          = var.dsc_namespace
@@ -198,7 +194,7 @@ module "target_cluster_registration" {
 
   # No policies or protection groups for target (it's just a recovery destination)
   policies          = []
-  protection_groups = null
+  protection_groups = []
 
   # Tags
   resource_tags = var.resource_tags
@@ -275,7 +271,7 @@ resource "terraform_data" "wait_for_backup" {
 ##############################################################################
 
 resource "terraform_data" "same_cluster_recovery" {
-  count = var.deployment_mode == "full_backup_recovery" && var.recovery_type == "same-cluster" ? 1 : 0
+  count = var.deployment_mode == "full_backup_recovery" && var.recovery_mode == "same-cluster" ? 1 : 0
 
   input = {
     url              = module.protect_cluster.brs_instance_url
@@ -320,7 +316,7 @@ resource "terraform_data" "same_cluster_recovery" {
 ##############################################################################
 
 resource "terraform_data" "cross_cluster_recovery" {
-  count = var.deployment_mode == "full_backup_recovery" && var.recovery_type == "cross-cluster" ? 1 : 0
+  count = var.deployment_mode == "full_backup_recovery" && var.recovery_mode == "cross-cluster" ? 1 : 0
 
   input = {
     url              = module.protect_cluster.brs_instance_url
@@ -417,7 +413,7 @@ resource "ibm_backup_recovery_protection_source_refresh" "post_recovery_refresh"
   count = var.deployment_mode == "full_backup_recovery" ? 1 : 0
 
   x_ibm_tenant_id                      = module.protect_cluster.brs_tenant_id
-  backup_recovery_protection_source_id = var.recovery_type == "cross-cluster" ? tonumber(split("::", module.target_cluster_registration[0].source_registration_id)[1]) : tonumber(split("::", module.protect_cluster.source_registration_id)[1])
+  backup_recovery_protection_source_id = var.recovery_mode == "cross-cluster" ? tonumber(split("::", module.target_cluster_registration[0].source_registration_id)[1]) : tonumber(split("::", module.protect_cluster.source_registration_id)[1])
   endpoint_type                        = var.brs_endpoint_type
   instance_id                          = module.protect_cluster.brs_instance_guid
   region                               = local.region

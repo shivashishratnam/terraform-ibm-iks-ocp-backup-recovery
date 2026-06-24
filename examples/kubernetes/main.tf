@@ -160,7 +160,6 @@ module "backup_recover_protect_iks" {
   auto_protect_policy_name = "${var.prefix}-retention"
   access_tags              = var.access_tags
   resource_tags            = var.resource_tags
-  # Policies are now created in the BRS module
   policies = [
     {
       name              = "${var.prefix}-retention"
@@ -179,104 +178,62 @@ module "backup_recover_protect_iks" {
   ]
   protection_groups = [
     {
-      # ========================================
-      # Basic Configuration
-      # ========================================
       name        = "${var.prefix}-protection-group"
       policy_name = "${var.prefix}-retention"
       description = "Comprehensive protection group demonstrating advanced features"
 
-      # ========================================
-      # Priority & QoS
-      # ========================================
-      priority   = "kHigh"      # kLow, kMedium, kHigh
-      qos_policy = "kBackupSSD" # kBackupHDD, kBackupSSD, kBackupAll
+      priority   = "kHigh"
+      qos_policy = "kBackupSSD"
 
-      # ========================================
-      # Scheduling & Timing
-      # ========================================
       start_time = {
-        hour      = 2                  # 2 AM
-        minute    = 30                 # 2:30 AM
-        time_zone = "America/New_York" # EST timezone
+        hour      = 2
+        minute    = 30
+        time_zone = "America/New_York"
       }
 
-      # ========================================
-      # Pause & Blackout Control
-      # ========================================
-      is_paused = false # Set to true to pause future runs
-      # abort_in_blackouts = false  # Let running backups complete
-      # pause_in_blackouts = true  # Don't start new backups during blackouts
+      is_paused = false
 
-      # ========================================
-      # Kubernetes-Specific Features
-      # ========================================
-      enable_indexing       = true  # Enable search/indexing of backed up data
-      leverage_csi_snapshot = true  # Use CSI snapshots for faster backups
-      non_snapshot_backup   = false # Use snapshot-based backups
-      volume_backup_failure = false # Don't fail entire backup if volume fails
+      enable_indexing       = true
+      leverage_csi_snapshot = true
+      non_snapshot_backup   = false
+      volume_backup_failure = false
 
-      # ========================================
-      # Objects to Protect
-      # ========================================
       objects = [
         {
           name = kubernetes_namespace_v1.workload_ns.metadata[0].name
 
-          # Backup configuration
-          backup_only_pvc             = false # Backup entire namespace, not just PVCs
-          fail_backup_on_hook_failure = false # Continue backup even if hooks fail
+          backup_only_pvc             = false
+          fail_backup_on_hook_failure = false
 
-          # Resource filtering
           included_resources = [
             "deployments",
             "statefulsets",
             "secrets"
           ]
 
-          # DO NOT include excluded_resources when using included_resources
-
-          # Explicitly set include_params to null to prevent API from returning empty block
+          # include_params must be null when included_resources is set to prevent
+          # the API from returning an empty block that causes perpetual drift.
           include_params = null
         }
       ]
 
-      # ========================================
-      # Label-Based Filtering (Global)
-      # ========================================
       include_params = {
-        label_combination_method = "OR" # Include if ANY label matches
+        label_combination_method = "OR"
         label_vector = [
-          {
-            key   = "backup-enabled"
-            value = "true"
-          },
-          {
-            key   = "environment"
-            value = "production"
-          }
+          { key = "backup-enabled", value = "true" },
+          { key = "environment", value = "production" }
         ]
       }
 
       exclude_params = {
-        label_combination_method = "AND" # Exclude only if ALL labels match
+        label_combination_method = "AND"
         label_vector = [
-          {
-            key   = "backup-exclude"
-            value = "true"
-          }
+          { key = "backup-exclude", value = "true" }
         ]
       }
 
-      # ========================================
-      # Alerts Configuration
-      # ========================================
       alert_policy = {
-        backup_run_status = [
-          "kFailure",
-          "kSlaViolation",
-          "kWarning"
-        ]
+        backup_run_status = ["kFailure", "kSlaViolation", "kWarning"]
 
         alert_targets = [
           {
@@ -296,31 +253,10 @@ module "backup_recover_protect_iks" {
         raise_object_level_failure_alert_after_each_attempt = false
       }
 
-      # ========================================
-      # SLA Configuration
-      # ========================================
       sla = [
-        {
-          backup_run_type = "kIncremental"
-          sla_minutes     = 60 # 1 hour for incremental backups
-        },
-        {
-          backup_run_type = "kFull"
-          sla_minutes     = 120 # 2 hours for full backups
-        }
+        { backup_run_type = "kIncremental", sla_minutes = 60 },
+        { backup_run_type = "kFull", sla_minutes = 120 }
       ]
     }
   ]
-  # recoveries = [{
-  #   name                 = "restore-production-namespace"
-  #   snapshot_environment = "kKubernetes"
-  #   kubernetes_params = {
-  #     recovery_action = "RecoverNamespaces"
-  #     objects = [{
-  #       snapshot_id         = "snapshot-123"
-  #       protection_group_id = "pg-456"
-  #     }]
-  #   }
-  # }]
-  # ========================================
 }

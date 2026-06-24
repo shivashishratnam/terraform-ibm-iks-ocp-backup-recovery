@@ -288,8 +288,8 @@ variable "protection_groups" {
     abort_in_blackouts = optional(bool, false)
     pause_in_blackouts = optional(bool, false)
   }))
-  default  = null
-  nullable = true
+  default  = []
+  nullable = false
 }
 
 
@@ -384,7 +384,7 @@ variable "dsc_image_version" {
   }
 }
 variable "dsc_registry" {
-  description = "Registry for the Data Source Connector."
+  description = "Registry for the Data Source Connector image. Use 'icr.io' for production and 'stg.icr.io' for UAT/staging."
   type        = string
   default     = "icr.io"
   nullable    = false
@@ -853,15 +853,15 @@ variable "policies" {
 # Recovery Configuration
 ##############################################################################
 
-variable "recovery_type" {
+variable "recovery_mode" {
   description = "Type of recovery to perform. 'same-cluster' restores to the original cluster with a namespace prefix. 'cross-cluster' restores to a different target cluster."
   type        = string
   default     = "same-cluster"
   nullable    = false
 
   validation {
-    condition     = contains(["same-cluster", "cross-cluster"], var.recovery_type)
-    error_message = "`recovery_type` must be 'same-cluster' or 'cross-cluster'."
+    condition     = contains(["same-cluster", "cross-cluster"], var.recovery_mode)
+    error_message = "`recovery_mode` must be 'same-cluster' or 'cross-cluster'."
   }
 }
 
@@ -907,24 +907,24 @@ variable "recovery_poll_interval_seconds" {
 ##############################################################################
 
 variable "target_cluster_id" {
-  description = "Target cluster ID for cross-cluster recovery. Required when `recovery_type` is 'cross-cluster'."
+  description = "Target cluster ID for cross-cluster recovery. Required when `recovery_mode` is 'cross-cluster'."
   type        = string
   default     = null
 
   validation {
-    condition     = var.recovery_type != "cross-cluster" || var.target_cluster_id != null
-    error_message = "`target_cluster_id` is required when `recovery_type` is 'cross-cluster'."
+    condition     = var.recovery_mode != "cross-cluster" || var.target_cluster_id != null
+    error_message = "`target_cluster_id` is required when `recovery_mode` is 'cross-cluster'."
   }
 }
 
 variable "target_cluster_resource_group_id" {
-  description = "Target cluster resource group ID for cross-cluster recovery. Required when `recovery_type` is 'cross-cluster'."
+  description = "Target cluster resource group ID for cross-cluster recovery. Required when `recovery_mode` is 'cross-cluster'."
   type        = string
   default     = null
 
   validation {
-    condition     = var.recovery_type != "cross-cluster" || var.target_cluster_resource_group_id != null
-    error_message = "`target_cluster_resource_group_id` is required when `recovery_type` is 'cross-cluster'."
+    condition     = var.recovery_mode != "cross-cluster" || var.target_cluster_resource_group_id != null
+    error_message = "`target_cluster_resource_group_id` is required when `recovery_mode` is 'cross-cluster'."
   }
 }
 
