@@ -1,4 +1,4 @@
-# Openshift example
+# OpenShift example
 
 <!-- BEGIN SCHEMATICS DEPLOY HOOK -->
 <p>

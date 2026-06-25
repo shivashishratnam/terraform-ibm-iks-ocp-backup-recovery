@@ -37,7 +37,7 @@ locals {
   backup_recovery_instance_url         = var.brs_endpoint_type == "public" ? local.backup_recovery_instance_public_url : local.backup_recovery_instance_private_url
   resolved_policy_ids                  = module.backup_recovery_instance.resolved_policy_ids
 
-  binaries_path = "/tmp"
+  binaries_path = var.binaries_install_path
 
   # --- DSC worker pool zone distribution ---
   # num_zones is derived from var.dsc_worker_pool_zones (known at plan time) so the

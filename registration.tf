@@ -8,7 +8,7 @@ resource "time_sleep" "wait_for_dsc_stabilization" {
   count = local.deploy_dsc ? 1 : 0
 
   depends_on      = [helm_release.data_source_connector]
-  create_duration = "5m"
+  create_duration = var.dsc_stabilization_wait
 }
 
 resource "ibm_backup_recovery_source_registration" "source_registration" {
@@ -57,7 +57,7 @@ resource "time_sleep" "brs_source_deregistration_wait" {
   count = local.deploy_source_registration ? 1 : 0
 
   depends_on       = [terraform_data.wait_before_helm_destroy]
-  destroy_duration = "5m"
+  destroy_duration = var.source_deregistration_wait
 }
 
 # Wait for BRS asynchronous discovery to stabilize before reading protection sources.
@@ -75,7 +75,7 @@ resource "time_sleep" "wait_for_source_discovery" {
     dsc_version   = var.dsc_image_version
   }
 
-  create_duration = "5m"
+  create_duration = var.source_discovery_wait
 }
 
 data "ibm_backup_recovery_protection_sources" "sources" {
@@ -127,7 +127,7 @@ resource "terraform_data" "delete_auto_protect_pg" {
 
   provisioner "local-exec" {
     when        = destroy
-    command     = "${path.module}/scripts/delete_auto_protect_pg.sh https://${self.input.url} ${self.input.tenant} ${self.input.endpoint_type} ${self.input.protection_group_id} ${self.input.registration_id}"
+    command     = "${path.module}/scripts/delete_auto_protect_pg.sh 'https://${self.input.url}' '${self.input.tenant}' '${self.input.endpoint_type}' '${self.input.protection_group_id}' '${self.input.registration_id}'"
     interpreter = ["/bin/bash", "-c"]
     environment = {
       API_KEY = self.triggers_replace.api_key

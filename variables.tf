@@ -80,6 +80,34 @@ variable "install_required_binaries" {
   nullable    = false
 }
 
+variable "binaries_install_path" {
+  description = "Filesystem path where runtime binaries (kubectl, jq, ibmcloud, backup-recovery plugin) are installed when `install_required_binaries` is true. Defaults to /tmp. Override for non-POSIX or restricted runtime environments."
+  type        = string
+  default     = "/tmp"
+  nullable    = false
+}
+
+variable "dsc_stabilization_wait" {
+  description = "How long to wait after the Data Source Connector pod reports ready before attempting source registration. The DSC needs time to establish its internal state before BRS can reach it. Expressed as a Terraform duration string (e.g., '5m', '3m30s')."
+  type        = string
+  default     = "5m"
+  nullable    = false
+}
+
+variable "source_discovery_wait" {
+  description = "How long to wait after source registration before reading protection sources. BRS performs asynchronous cluster discovery after registration; this sleep ensures the source tree is populated. Expressed as a Terraform duration string (e.g., '5m', '3m')."
+  type        = string
+  default     = "5m"
+  nullable    = false
+}
+
+variable "source_deregistration_wait" {
+  description = "How long to wait during destroy after the Helm release is removed before deregistering the BRS source. BRS source deregistration is asynchronous; without this wait the connection deletion fails with 'source still in use'. Expressed as a Terraform duration string (e.g., '5m', '3m')."
+  type        = string
+  default     = "5m"
+  nullable    = false
+}
+
 
 ##############################################################################
 # Data Source Connector (DSC)

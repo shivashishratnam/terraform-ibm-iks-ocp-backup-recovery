@@ -8,15 +8,11 @@ import (
 	"github.com/terraform-ibm-modules/ibmcloud-terratest-wrapper/common"
 )
 
-// Ensure every example directory has a corresponding test
-const ocpClassicExampleDir = "examples/openshift"
-const iksClassicExampleDir = "examples/kubernetes"
-
 func TestRunIKSClassicExample(t *testing.T) {
 	t.Parallel()
 
 	region := validRegions[common.CryptoIntn(len(validRegions))]
-	options := setupOptions(t, "brs-iksc", iksClassicExampleDir, []string{
+	options := setupOptions(t, "brs-iksc", iksExampleDir, []string{
 		"module.backup_recover_protect_ocp.ibm_backup_recovery_source_registration.source_registration",
 		"ibm_container_vpc_cluster.cluster[0]",
 		"ibm_container_cluster.cluster[0]",
@@ -39,7 +35,7 @@ func TestRunOCPClassicExample(t *testing.T) {
 	t.Parallel()
 
 	region := validRegions[common.CryptoIntn(len(validRegions))]
-	options := setupOptions(t, "brs-ocpc", ocpClassicExampleDir, []string{
+	options := setupOptions(t, "brs-ocpc", ocpExampleDir, []string{
 		"module.backup_recover_protect_ocp.ibm_backup_recovery_source_registration.source_registration",
 		"module.ocp_base[0].ibm_container_vpc_cluster.cluster[0]",
 		"ibm_container_cluster.classic_cluster[0]",

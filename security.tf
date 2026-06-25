@@ -1,5 +1,12 @@
 ##############################################################################
 # Security Group Rules for Data Source Connector
+#
+# All three rules use remote = "0.0.0.0/0" because IBM does not publish fixed
+# CIDR ranges for the BRS dataplane. The rules are outbound-only and scoped to
+# the specific ports the DSC requires:
+#   443    – BRS control plane (HTTPS)
+#   29991  – BRS data plane (proprietary protocol)
+#   <cluster API port> – Kubernetes API server access from the DSC pod
 ##############################################################################
 
 module "dsc_sg_rule" {

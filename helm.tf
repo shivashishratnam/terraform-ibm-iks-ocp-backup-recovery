@@ -119,6 +119,10 @@ resource "kubernetes_service_account_v1" "brsagent" {
   depends_on = [kubernetes_namespace_v1.dsc_namespace]
 }
 
+# The BRS agent requires cluster-admin to read and snapshot resources across all
+# namespaces and to manage Velero/OADP objects during backup and restore. A
+# least-privilege custom ClusterRole is not supported by the IBM BRS agent.
+# This is an accepted security trade-off documented in the module README.
 resource "kubernetes_cluster_role_binding_v1" "brsagent_admin" {
   count = local.deploy_source_registration ? 1 : 0
 
