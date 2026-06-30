@@ -73,14 +73,3 @@ variable "enable_recovery" {
   type        = bool
   default     = false
 }
-
-variable "recovery_mode" {
-  description = "Recovery mode: 'same-cluster' or 'cross-cluster'. Use 'cross-cluster' to test recovery to target cluster."
-  type        = string
-  default     = "cross-cluster"
-
-  validation {
-    condition     = contains(["same-cluster", "cross-cluster"], var.recovery_mode)
-    error_message = "recovery_mode must be either 'same-cluster' or 'cross-cluster'."
-  }
-}

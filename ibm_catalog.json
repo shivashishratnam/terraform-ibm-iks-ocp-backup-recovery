@@ -429,8 +429,8 @@
               "display_name": "Resource Tags"
             },
             {
-              "key": "recovery_type",
-              "display_name": "Recovery Type",
+              "key": "recovery_mode",
+              "display_name": "Recovery Mode",
               "description": "Type of recovery: 'same-cluster' or 'cross-cluster'.",
               "options": [
                 {

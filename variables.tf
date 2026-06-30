@@ -41,7 +41,7 @@ variable "kube_type" {
       "openshift",
       "kubernetes",
     ], var.kube_type)
-    error_message = "Accepted values are: ROKS or IKS."
+    error_message = "Accepted values are `openshift` or `kubernetes`."
   }
 }
 
@@ -80,6 +80,34 @@ variable "install_required_binaries" {
   nullable    = false
 }
 
+variable "binaries_install_path" {
+  description = "Filesystem path where runtime binaries (kubectl, jq, ibmcloud, backup-recovery plugin) are installed when `install_required_binaries` is true. Defaults to /tmp. Override for non-POSIX or restricted runtime environments."
+  type        = string
+  default     = "/tmp"
+  nullable    = false
+}
+
+variable "dsc_stabilization_wait" {
+  description = "How long to wait after the Data Source Connector pod reports ready before attempting source registration. The DSC needs time to establish its internal state before BRS can reach it. Expressed as a Terraform duration string (e.g., '5m', '3m30s')."
+  type        = string
+  default     = "5m"
+  nullable    = false
+}
+
+variable "source_discovery_wait" {
+  description = "How long to wait after source registration before reading protection sources. BRS performs asynchronous cluster discovery after registration; this sleep ensures the source tree is populated. Expressed as a Terraform duration string (e.g., '5m', '3m')."
+  type        = string
+  default     = "5m"
+  nullable    = false
+}
+
+variable "source_deregistration_wait" {
+  description = "How long to wait during destroy after the Helm release is removed before deregistering the BRS source. BRS source deregistration is asynchronous; without this wait the connection deletion fails with 'source still in use'. Expressed as a Terraform duration string (e.g., '5m', '3m')."
+  type        = string
+  default     = "5m"
+  nullable    = false
+}
+
 
 ##############################################################################
 # Data Source Connector (DSC)
@@ -109,6 +137,12 @@ variable "dsc_image_version" {
   }
 
   nullable = false
+}
+variable "dsc_registry" {
+  description = "Registry for the Data Source Connector image. Use 'icr.io' for production and 'stg.icr.io' for UAT/staging."
+  type        = string
+  default     = "icr.io"
+  nullable    = false
 }
 
 variable "dsc_name" {
@@ -294,41 +328,17 @@ variable "connection_env_type" {
 }
 
 ##############################################################################
-# Use Case Control Flags
-##############################################################################
-
-variable "deployment_mode" {
-  description = <<-DESC
-    Deployment mode to control what components are deployed:
-    - 'backup_only' (default): Registers source cluster with BRS, configures protection groups. No target cluster, no recovery.
-    - 'connected_component': Registers both source + target clusters with BRS for cluster connection setup only. No backup or recovery triggered.
-    - 'full_backup_recovery': End-to-end: registers clusters, triggers on-demand backup, waits for completion, executes recovery to validate.
-  DESC
-  type        = string
-  default     = "backup_only"
-
-  validation {
-    condition     = contains(["backup_only", "connected_component", "full_backup_recovery"], var.deployment_mode)
-    error_message = "`deployment_mode` must be one of 'backup_only', 'connected_component', or 'full_backup_recovery'."
-  }
-}
-
-##############################################################################
 # Protection Policy
 ##############################################################################
 
 variable "auto_protect_policy_name" {
-  description = "Name of an existing protection policy to use for auto-protect. Required when `enable_auto_protect` is `true` and deployment_mode is 'backup_only' or 'full_backup_recovery'. The policy must already exist in the BRS instance (create it using the `terraform-ibm-backup-recovery` module)."
+  description = "Name of an existing protection policy to use for auto-protect. Required when `enable_auto_protect` is `true`. The policy must already exist in the BRS instance (create it using the `terraform-ibm-backup-recovery` module)."
   type        = string
   default     = null
 
   validation {
-    condition = (
-      var.deployment_mode == "connected_component" ||
-      var.enable_auto_protect == false ||
-      (var.enable_auto_protect == true && var.auto_protect_policy_name != null)
-    )
-    error_message = "auto_protect_policy_name is required when enable_auto_protect is true in 'backup_only' or 'full_backup_recovery' modes."
+    condition     = var.enable_auto_protect == false || var.auto_protect_policy_name != null
+    error_message = "auto_protect_policy_name is required when enable_auto_protect is true."
   }
 }
 
@@ -336,27 +346,6 @@ variable "enable_auto_protect" {
   description = "Enable auto-protect during the initial cluster registration. This must be set to `true` on the first run; toggling it from `false` to `true` later is not supported by the underlying API and will not retroactively create the protection group."
   type        = bool
   default     = true
-}
-variable "backup_run_poll_timeout_minutes" {
-  description = "Maximum time in minutes to poll for the first restorable backup run when recovery is enabled in a single apply."
-  type        = number
-  default     = 45
-
-  validation {
-    condition     = var.backup_run_poll_timeout_minutes >= 1
-    error_message = "backup_run_poll_timeout_minutes must be at least 1."
-  }
-}
-
-variable "backup_run_poll_interval_seconds" {
-  description = "Polling interval in seconds when waiting for the first restorable backup run."
-  type        = number
-  default     = 30
-
-  validation {
-    condition     = var.backup_run_poll_interval_seconds >= 5
-    error_message = "backup_run_poll_interval_seconds must be at least 5."
-  }
 }
 
 ##############################################################################
@@ -922,170 +911,5 @@ variable "policies" {
       )
     ])
     error_message = "The tiering configuration block must match the selected cloud_platform (e.g., provide 'aws_tiering' for 'AWS')."
-  }
-}
-
-##############################################################################
-# Recovery Variables
-##############################################################################
-
-variable "recovery_mode" {
-  description = "Recovery mode: 'same-cluster' to restore within the same cluster, or 'cross-cluster' to restore to a different target cluster. This is used when recovery is enabled by the calling module."
-  type        = string
-  default     = "same-cluster"
-
-  validation {
-    condition     = contains(["same-cluster", "cross-cluster"], var.recovery_mode)
-    error_message = "recovery_mode must be either 'same-cluster' or 'cross-cluster'."
-  }
-}
-
-variable "target_cluster_id" {
-  description = "Target cluster ID for cross-cluster recovery or connected component setup. Required when `var.recovery_mode` is 'cross-cluster' or when `deployment_mode` is 'connected_component'. Must be a cluster already registered with the BRS instance."
-  type        = string
-  default     = null
-
-  validation {
-    condition = (
-      var.deployment_mode == "backup_only" ||
-      (var.deployment_mode == "connected_component" && var.target_cluster_id != null) ||
-      (var.deployment_mode == "full_backup_recovery" && var.recovery_mode == "same-cluster") ||
-      (var.deployment_mode == "full_backup_recovery" && var.recovery_mode == "cross-cluster" && var.target_cluster_id != null)
-    )
-    error_message = "target_cluster_id is required when deployment_mode is 'connected_component' or when recovery_mode is 'cross-cluster' in 'full_backup_recovery' mode."
-  }
-}
-
-variable "target_cluster_resource_group_id" {
-  description = "Resource group ID of the target cluster for cross-cluster recovery or connected component setup. Required when recovery_mode is 'cross-cluster' or when `deployment_mode` is 'connected_component'."
-  type        = string
-  default     = null
-
-  validation {
-    condition = (
-      var.deployment_mode == "backup_only" ||
-      (var.deployment_mode == "connected_component" && var.target_cluster_resource_group_id != null) ||
-      (var.deployment_mode == "full_backup_recovery" && var.recovery_mode == "same-cluster") ||
-      (var.deployment_mode == "full_backup_recovery" && var.recovery_mode == "cross-cluster" && var.target_cluster_resource_group_id != null)
-    )
-    error_message = "target_cluster_resource_group_id is required when deployment_mode is 'connected_component' or when recovery_mode is 'cross-cluster' in 'full_backup_recovery' mode."
-  }
-}
-
-
-variable "recoveries" {
-  description = "List of recovery operations to restore backups. These operations are triggered automatically after a backup run completes when recovery is enabled by the calling module. Each entry's `kubernetes_params.objects[*].snapshot_id` controls which backup is restored: supply an explicit snapshot ID to recover from any specific backup (not necessarily the one taken in the current apply), or use the `latest_snapshots` output to reference the most recent run. Supports multiple environments: Kubernetes, VMware, Physical, AWS, Azure, GCP, SQL, Oracle, and more. This variable follows the official IBM Backup Recovery provider schema. For IKS/ROKS recovery use `kubernetes_params`. See the Usage section in the README for examples."
-  type = list(object({
-    name                 = string
-    snapshot_environment = string # kKubernetes, kVMware, kPhysical, kAWS, kAzure, kGCP, kSQL, kOracle, kView, etc.
-
-    # Kubernetes-specific recovery parameters
-    kubernetes_params = optional(object({
-      recovery_action = string # RecoverNamespaces, RecoverPVs, RecoverApps
-
-      objects = list(object({
-        snapshot_id           = string
-        point_in_time_usecs   = optional(number)
-        protection_group_id   = optional(string)
-        protection_group_name = optional(string)
-        recover_from_standby  = optional(bool, false)
-      }))
-    }))
-
-    # VMware-specific recovery parameters (for future provider support)
-    vmware_params = optional(object({
-      recovery_action = optional(string)
-      objects = optional(list(object({
-        snapshot_id           = optional(string)
-        point_in_time_usecs   = optional(number)
-        protection_group_id   = optional(string)
-        protection_group_name = optional(string)
-        recover_from_standby  = optional(bool, false)
-      })))
-    }))
-
-    # Physical server recovery parameters (for future provider support)
-    physical_params = optional(object({
-      recovery_action = optional(string)
-      objects = optional(list(object({
-        snapshot_id           = optional(string)
-        point_in_time_usecs   = optional(number)
-        protection_group_id   = optional(string)
-        protection_group_name = optional(string)
-      })))
-    }))
-
-    # AWS-specific recovery parameters (for future provider support)
-    aws_params = optional(object({
-      recovery_action = optional(string)
-      objects = optional(list(object({
-        snapshot_id           = optional(string)
-        point_in_time_usecs   = optional(number)
-        protection_group_id   = optional(string)
-        protection_group_name = optional(string)
-      })))
-    }))
-
-    # Azure-specific recovery parameters (for future provider support)
-    azure_params = optional(object({
-      recovery_action = optional(string)
-      objects = optional(list(object({
-        snapshot_id           = optional(string)
-        point_in_time_usecs   = optional(number)
-        protection_group_id   = optional(string)
-        protection_group_name = optional(string)
-      })))
-    }))
-
-    # GCP-specific recovery parameters (for future provider support)
-    gcp_params = optional(object({
-      recovery_action = optional(string)
-      objects = optional(list(object({
-        snapshot_id           = optional(string)
-        point_in_time_usecs   = optional(number)
-        protection_group_id   = optional(string)
-        protection_group_name = optional(string)
-      })))
-    }))
-
-    # SQL-specific recovery parameters (for future provider support)
-    sql_params = optional(object({
-      recovery_action = optional(string)
-      objects = optional(list(object({
-        snapshot_id           = optional(string)
-        point_in_time_usecs   = optional(number)
-        protection_group_id   = optional(string)
-        protection_group_name = optional(string)
-      })))
-    }))
-
-    # Oracle-specific recovery parameters (for future provider support)
-    oracle_params = optional(object({
-      recovery_action = optional(string)
-      objects = optional(list(object({
-        snapshot_id           = optional(string)
-        point_in_time_usecs   = optional(number)
-        protection_group_id   = optional(string)
-        protection_group_name = optional(string)
-      })))
-    }))
-  }))
-  default  = []
-  nullable = false
-
-  validation {
-    condition = alltrue([
-      for r in var.recoveries : contains([
-        "kKubernetes", "kVMware", "kPhysical", "kAWS", "kAzure",
-        "kGCP", "kSQL", "kOracle", "kView", "kPuppeteer",
-        "kPhysicalFiles", "kPure", "kNimble", "kAzureNative",
-        "kAD", "kAWSNative", "kGCPNative", "kKVM", "kAcropolis",
-        "kExchange", "kHyperV", "kHyperVVSS", "kO365", "kO365Outlook",
-        "kO365PublicFolders", "kO365Teams", "kO365Group", "kO365Exchange",
-        "kO365OneDrive", "kO365Sharepoint", "kCassandra", "kMongoDB",
-        "kCouchbase", "kHdfs", "kHive", "kHBase", "kUDA", "kSfdc"
-      ], r.snapshot_environment)
-    ])
-    error_message = "snapshot_environment must be a valid environment type as per IBM Backup Recovery provider documentation."
   }
 }

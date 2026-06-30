@@ -40,6 +40,9 @@ terraform.rc
 # Ignore .tfsec
 .tfsec/
 
+# Kubeconfig files written at runtime by the ibm_container_cluster_config data source
+**/kubeconfig/
+
 # Ignore Mac files
 .DS_Store
 

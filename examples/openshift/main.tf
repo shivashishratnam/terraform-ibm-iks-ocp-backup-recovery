@@ -147,12 +147,10 @@ data "ibm_container_cluster" "classic_cluster_data" {
 
 locals {
   cluster_id = var.cluster_name_id != null ? (var.classic_cluster ? data.ibm_container_cluster.classic_cluster_data[0].id : data.ibm_container_vpc_cluster.vpc_cluster_data[0].name) : (var.classic_cluster ? ibm_container_cluster.classic_cluster[0].id : module.ocp_base[0].cluster_id)
-
-  cluster_name_id_for_config = var.cluster_name_id != null ? (var.classic_cluster ? data.ibm_container_cluster.classic_cluster_data[0].id : data.ibm_container_vpc_cluster.vpc_cluster_data[0].name) : (var.classic_cluster ? ibm_container_cluster.classic_cluster[0].id : module.ocp_base[0].cluster_id)
 }
 
 data "ibm_container_cluster_config" "cluster_config" {
-  cluster_name_id   = local.cluster_name_id_for_config
+  cluster_name_id   = local.cluster_id
   resource_group_id = module.resource_group.resource_group_id
   admin             = true
 }
@@ -193,7 +191,6 @@ module "backup_recover_protect_ocp" {
   auto_protect_policy_name = "${var.prefix}-retention"
   access_tags              = var.access_tags
   resource_tags            = var.resource_tags
-  # Policies are now created in the BRS module
   policies = [
     {
       name              = "${var.prefix}-retention"
