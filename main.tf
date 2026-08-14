@@ -7,6 +7,41 @@ locals {
   is_vpc     = length(regexall("Vpc$", var.connection_env_type)) > 0
   is_classic = length(regexall("Classic$", var.connection_env_type)) > 0
 
+  # --- Cross-account detection ---
+  # S2S IAM authorization policy is only required when the VPEG (source account)
+  # and the BRS instance (target account) live in DIFFERENT IBM Cloud accounts.
+  # Both account IDs are auto-derived from IAM JWT tokens — no extra roles required.
+  # Cross-account detection compares the two provider tokens directly.
+  #
+  # Decode the target account ID from the IAM JWT.
+  tgt_jwt_payload_raw = split(".", data.ibm_iam_auth_token.target_account.iam_access_token)[1]
+  tgt_jwt_payload_padded = format("%s%s",
+    local.tgt_jwt_payload_raw,
+    substr("====", 0, (4 - (length(local.tgt_jwt_payload_raw) % 4)) % 4)
+  )
+  target_account_id = jsondecode(
+    base64decode(
+      replace(replace(local.tgt_jwt_payload_padded, "-", "+"), "_", "/")
+    )
+  ).account.bss
+
+  # Decode the source account ID from the ibm.cluster provider token.
+  src_jwt_payload_raw = split(".", data.ibm_iam_auth_token.source_account.iam_access_token)[1]
+  src_jwt_payload_padded = format("%s%s",
+    local.src_jwt_payload_raw,
+    substr("====", 0, (4 - (length(local.src_jwt_payload_raw) % 4)) % 4)
+  )
+  source_account_id = jsondecode(
+    base64decode(
+      replace(replace(local.src_jwt_payload_padded, "-", "+"), "_", "/")
+    )
+  ).account.bss
+
+  is_cross_account = (
+    var.create_brs_vpe &&
+    local.source_account_id != local.target_account_id
+  )
+
   # --- Deployment mode flags ---
   # DSC, source registration, and protection groups are always deployed in every
   # deployment_mode. deploy_recovery is the only mode-gated flag.
@@ -50,6 +85,52 @@ locals {
   resolved_policy_ids = module.backup_recovery_instance.resolved_policy_ids
 
   binaries_path = "/tmp"
+
+  # --- VPC subnet auto-discovery (for VPE gateway) ---
+  # All subnet IDs attached to the cluster's worker pools — flattened then
+  # deduplicated. A single-zone cluster exposes the same subnet ID once per
+  # worker pool, so without distinct() the list has duplicates that produce
+  # duplicate for_each keys in the VPE gateway reserved-IP module.
+  # For classic clusters is_vpc is false so this will be [].
+  cluster_subnet_ids = local.is_vpc ? distinct(flatten(
+    data.ibm_container_vpc_cluster.vpc_cluster[0].worker_pools[*].zones[*].subnets[*].id
+  )) : []
+
+  # Only look up cluster subnets when ALL of the following hold:
+  #   1. VPE creation is requested
+  #   2. Caller did NOT supply vpc_subnets explicitly (auto-discovery path)
+  #   3. The cluster is a VPC cluster
+  # When the caller supplies vpc_subnets (including when a new cluster is being
+  # created in the same apply), skip the lookup entirely — the list length is
+  # already known at plan time from the caller-supplied value, so the count
+  # below is always static and Terraform can plan correctly.
+  cluster_subnet_lookup_count = (
+    var.create_brs_vpe &&
+    length(var.vpc_subnets) == 0 &&
+    local.is_vpc &&
+    length(local.cluster_subnet_ids) > 0
+  ) ? length(local.cluster_subnet_ids) : 0
+
+  # VPC ID: user-supplied takes precedence; auto-derived from the first
+  # cluster subnet lookup otherwise.
+  resolved_vpc_id = var.vpc_id != null ? var.vpc_id : (
+    local.cluster_subnet_lookup_count > 0 ? data.ibm_is_subnet.cluster_subnet[0].vpc : null
+  )
+
+  # Subnet list: user-supplied takes precedence; built from the per-subnet
+  # lookups otherwise. Deduplication of cluster_subnet_ids ensures each subnet
+  # object appears exactly once — required by the VPE module's for_each key.
+  resolved_vpc_subnets = length(var.vpc_subnets) > 0 ? var.vpc_subnets : (
+    local.cluster_subnet_lookup_count > 0 ? [for s in data.ibm_is_subnet.cluster_subnet : {
+      name = s.name
+      id   = s.id
+      zone = s.zone
+    }] : []
+  )
+
+  # vpc_name is used only in the VPE name template; the actual vpc_id is passed separately.
+  # Using a fixed string keeps the final VPE gateway name within the 63-character limit.
+  brs_vpe_vpc_name = "vpc"
 
   # --- DSC worker pool zone math ---
   # Calculate workers per zone based on total replicas.
@@ -221,6 +302,21 @@ resource "terraform_data" "install_dependencies" {
 }
 
 ##############################################################################
+# Account identity — used to detect cross-account vs same-account deployments
+##############################################################################
+
+# Derive the target (BRS) account ID from the IAM token issued for ibmcloud_api_key.
+# ibm_iam_auth_token requires only a valid API key — no extra IAM roles needed.
+# The account ID is embedded in the JWT payload under .account.bss.
+data "ibm_iam_auth_token" "target_account" {}
+
+# Derive the source (cluster) account ID from the token issued for ibm.cluster.
+# When ibm.cluster == ibm (same account), this token is identical to target_account.
+data "ibm_iam_auth_token" "source_account" {
+  provider = ibm.cluster
+}
+
+##############################################################################
 # CRN Parser (for existing BRS instance)
 ##############################################################################
 
@@ -258,7 +354,7 @@ module "backup_recovery_instance" {
 
 data "ibm_container_vpc_cluster" "vpc_cluster" {
   count    = local.is_vpc ? 1 : 0
-  provider = ibm.source_account
+  provider = ibm.cluster
 
   name              = var.cluster_id
   resource_group_id = var.cluster_resource_group_id
@@ -268,7 +364,7 @@ data "ibm_container_vpc_cluster" "vpc_cluster" {
 
 data "ibm_container_cluster" "classic_cluster" {
   count    = local.is_classic ? 1 : 0
-  provider = ibm.source_account
+  provider = ibm.cluster
 
   name              = var.cluster_id
   resource_group_id = var.cluster_resource_group_id
@@ -277,7 +373,7 @@ data "ibm_container_cluster" "classic_cluster" {
 }
 
 data "ibm_container_cluster_config" "cluster_config" {
-  provider = ibm.source_account
+  provider = ibm.cluster
 
   cluster_name_id   = var.cluster_id
   resource_group_id = var.cluster_resource_group_id
@@ -295,11 +391,32 @@ data "ibm_container_cluster_config" "cluster_config" {
 
 data "ibm_container_vpc_worker_pool" "pool" {
   count    = local.is_vpc ? 1 : 0
-  provider = ibm.source_account
+  provider = ibm.cluster
 
   cluster          = data.ibm_container_vpc_cluster.vpc_cluster[0].id
   worker_pool_name = data.ibm_container_vpc_cluster.vpc_cluster[0].worker_pools[0].name
 }
+
+##############################################################################
+# VPC + Subnet auto-discovery  (used when create_brs_vpe = true)
+#
+# ibm_container_vpc_cluster does not export vpc_id as a top-level attribute.
+# We flatten all subnet IDs from worker_pools -> zones -> subnets, look each
+# up via ibm_is_subnet (one per subnet, all IDs known at plan time from the
+# worker_pool splat), then use the first result to derive the VPC ID.
+# Users no longer need to supply vpc_id or vpc_subnets when create_brs_vpe = true.
+##############################################################################
+
+
+# Look up every unique cluster subnet individually.
+# The IDs come from worker_pools splat and are known at plan time, so the
+# count is static and Terraform can plan correctly without a two-phase apply.
+data "ibm_is_subnet" "cluster_subnet" {
+  count      = local.cluster_subnet_lookup_count
+  provider   = ibm.cluster
+  identifier = local.cluster_subnet_ids[count.index]
+}
+
 
 ##############################################################################
 # Security Group Rules for Data Source Connector
@@ -311,7 +428,7 @@ module "dsc_sg_rule" {
   source  = "terraform-ibm-modules/security-group/ibm"
   version = "v2.9.1"
   providers = {
-    ibm = ibm.source_account
+    ibm = ibm.cluster
   }
   resource_group               = var.cluster_resource_group_id
   existing_security_group_name = "kube-${var.cluster_id}"
@@ -345,13 +462,122 @@ module "dsc_sg_rule" {
 }
 
 ##############################################################################
+# S2S IAM Authorization Policy (cross-account: source VPC → BRS instance)
+##############################################################################
+
+# When the BRS instance is in a different IBM Cloud account than the cluster VPC,
+# the VPEG target (the BRS CRN) lives in the target account.  The VPC
+# Infrastructure Service in the source account needs a Viewer authorization on
+# the BRS instance before the VPEG can be created.
+#
+# Policy model (created in the TARGET / BRS account):
+#   Subject  : VPC Infrastructure Services / endpoint-gateway  in source account
+#   Resource : backup-recovery instance GUID
+#   Role     : Viewer
+#
+# Only created when the ibm.cluster provider resolves to a different account
+# than the default ibm provider (cross-account detection is automatic via JWT).
+# Same-account VPE deployments do not need an S2S policy.
+module "brs_s2s_auth" {
+  # Only create the S2S IAM authorization policy when:
+  #   1. A VPEG is being created (create_brs_vpe = true), AND
+  #   2. The cluster VPC account differs from the BRS instance account (cross-account)
+  # Same-account VPE deployments do not need an S2S policy — the VPC API can
+  # already resolve the BRS CRN within the same account.
+  count   = local.is_cross_account ? 1 : 0
+  source  = "terraform-ibm-modules/s2s-auth/ibm"
+  version = "2.3.1"
+
+  enable_cbr = false
+
+  service_map = {
+    "brs-vpe-source-to-brs-target" = {
+      # Source: VPC Infrastructure Services / endpoint-gateway in the SOURCE account
+      source_service_name       = "is"
+      source_resource_type      = "endpoint-gateway"
+      source_service_account_id = local.source_account_id
+
+      # Target: the specific BRS instance in this (TARGET) account
+      target_service_name         = "backup-recovery"
+      target_resource_instance_id = local.brs_instance_guid
+
+      roles       = ["Viewer"]
+      description = "Allow VPC endpoint-gateway in account ${local.source_account_id} to target BRS instance ${local.brs_instance_guid}"
+    }
+  }
+
+  depends_on = [module.backup_recovery_instance]
+}
+
+##############################################################################
+# Virtual Private Endpoint Gateway for BRS
+##############################################################################
+
+# VPE Gateway naming: use a short, fixed vpc_name to avoid exceeding IBM's
+# 63-character resource name limit. The vpc_name is only used in the VPE name
+# template (e.g., "<prefix>-<vpc_name>-vpe-gateway"); the actual vpc_id is
+# specified separately and is what matters for API operations.
+
+# The VPE Gateway must be created after the S2S IAM authorization policy
+# exists in the target account.  The `depends_on = [module.brs_s2s_auth]`
+# below enforces that ordering.  The VPC service-resolution layer resolves
+# the cross-account BRS CRN instantly once the S2S policy is in place —
+# no additional sleep is required.
+module "brs_vpe" {
+  count   = var.create_brs_vpe && local.is_vpc ? 1 : 0
+  source  = "terraform-ibm-modules/vpe-gateway/ibm"
+  version = "5.3.5"
+  providers = {
+    ibm = ibm.cluster
+  }
+
+  # Use var.region (the cluster's region, always known at plan time) rather than
+  # local.brs_instance_region (derived from the BRS CRN, unknown until apply).
+  # The VPE is always co-located with the cluster; the BRS instance region only
+  # diverges when using cross-region replication (not supported here).
+  region            = var.region
+  prefix            = var.brs_vpe_name != null ? var.brs_vpe_name : "brs"
+  vpc_name          = local.brs_vpe_vpc_name
+  vpc_id            = local.resolved_vpc_id
+  subnet_zone_list  = local.resolved_vpc_subnets
+  resource_group_id = var.cluster_resource_group_id
+
+  # Attach to the Kubernetes VPEG security group (kube-vpegw-<vpc-id>).
+  # IKS/ROKS automatically creates this SG on every VPC cluster and it is
+  # pre-configured to allow the cluster worker nodes to reach VPE targets.
+  security_group_ids = [data.ibm_is_security_group.kube_vpeg_sg[0].id]
+
+  # vpe_name is set explicitly so the for_each key in the child module is a
+  # static string known at plan time (not derived from vpc_id or CRN).
+  # Without this, the key would be "${prefix}-${vpc_name}-backup-recovery"
+  # where vpc_name comes from the worker-pool data source — unknown at plan.
+  cloud_service_by_crn = [
+    {
+      crn          = module.backup_recovery_instance.brs_instance_crn
+      service_name = "backup-recovery"
+      vpe_name     = var.brs_vpe_name != null ? var.brs_vpe_name : "${lower(var.brs_connection_name)}-vpe"
+    }
+  ]
+
+  depends_on = [module.brs_s2s_auth]
+}
+
+# Fetch the kube-vpegw-<vpc-id> security group that IKS/ROKS creates on every
+# VPC cluster. It is pre-scoped to allow cluster nodes to reach VPE endpoints.
+data "ibm_is_security_group" "kube_vpeg_sg" {
+  count    = var.create_brs_vpe && local.is_vpc ? 1 : 0
+  provider = ibm.cluster
+  name     = "kube-vpegw-${local.resolved_vpc_id}"
+}
+
+##############################################################################
 # Data Source Connector Worker Pools (Single-Zone)
 ##############################################################################
 
 
 resource "ibm_container_vpc_worker_pool" "data_source_connector" {
   count    = local.is_vpc && var.create_dsc_worker_pool ? local.num_zones : 0
-  provider = ibm.source_account
+  provider = ibm.cluster
 
   cluster           = data.ibm_container_vpc_cluster.vpc_cluster[0].id
   worker_pool_name  = "dsc-pool-zone-${count.index + 1}"
@@ -612,10 +838,16 @@ resource "helm_release" "data_source_connector" {
   depends_on = [
     terraform_data.dsc_immutable_values,
     terraform_data.wait_for_dsc_node_ready,
-    terraform_data.check_existing_registration,
     terraform_data.purge_stale_dsc_pvc,
     ibm_container_vpc_worker_pool.data_source_connector,
     kubernetes_namespace_v1.dsc_namespace,
+    # Ensure the VPE Gateway is live before the DSC pod starts.
+    # When create_brs_vpe = true, the VPEG is module.brs_vpe[0]; DSC traffic
+    # routes to BRS via the VPEG private endpoint immediately on pod startup.
+    # When create_brs_vpe = false (cross-account, VPEG managed externally),
+    # module.brs_vpe has count = 0 so this dep is a no-op — safe in all configs.
+    module.brs_vpe,
+    terraform_data.check_existing_registration,
   ]
 
   lifecycle {
@@ -1224,7 +1456,7 @@ resource "terraform_data" "cancel_pg_runs" {
 # Set add_cluster_tags = false to prevent tag drift when cluster tags are managed externally.
 resource "ibm_resource_tag" "cluster_brs_tag" {
   count    = var.add_cluster_tags ? 1 : 0
-  provider = ibm.source_account
+  provider = ibm.cluster
 
   resource_id = local.cluster_crn
   tag_type    = "user"

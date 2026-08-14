@@ -5,7 +5,7 @@ terraform {
     ibm = {
       source                = "IBM-Cloud/ibm"
       version               = ">= 2.2.2, < 3.0.0"
-      configuration_aliases = [ibm.source_account]
+      configuration_aliases = [ibm.cluster]
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
