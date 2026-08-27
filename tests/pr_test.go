@@ -38,7 +38,6 @@ var includeFiletypes = []string{".tf", ".yaml", ".py", ".tpl", ".md", ".sh"}
 // and can push total wall-clock time over the GitHub Actions job limit.
 var validRegions = []string{
 	"eu-es",
-	"eu-gb",
 	"eu-de",
 	"br-sao",
 	"ca-tor",
