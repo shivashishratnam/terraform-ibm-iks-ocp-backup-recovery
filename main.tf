@@ -134,18 +134,8 @@ locals {
 
   # --- DSC worker pool zone math ---
   # Calculate workers per zone based on total replicas.
-  #
-  # num_zones MUST derive from var.dsc_worker_pool_zones only (a static input)
-  # so that the worker pool `count` is known at plan time.  Using a
-  # data-source-derived length here causes "Invalid count argument" errors.
-  #
-  # To guard against the "Invalid index" crash on refresh/destroy — which
-  # occurs when worker_pools[0] resolves to a single-zone DSC pool instead of
-  # the original default pool — the zone index is clamped inside the resource
-  # block using min(count.index, length(zones_list)-1).  This keeps count
-  # static while preventing an out-of-bounds access on zones_list.
-  zones_list    = local.is_vpc && var.create_dsc_worker_pool ? [for zone in data.ibm_container_vpc_worker_pool.pool[0].zones : zone] : []
   num_zones     = local.is_vpc && var.create_dsc_worker_pool ? var.dsc_worker_pool_zones : 0
+  zones_list    = local.is_vpc && var.create_dsc_worker_pool ? [for zone in data.ibm_container_vpc_worker_pool.pool[0].zones : zone] : []
   base_workers  = local.num_zones > 0 ? floor(var.dsc_replicas / local.num_zones) : 0
   extra_workers = local.num_zones > 0 ? var.dsc_replicas % local.num_zones : 0
 
