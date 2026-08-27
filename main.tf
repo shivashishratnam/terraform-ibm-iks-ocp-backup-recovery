@@ -134,8 +134,12 @@ locals {
 
   # --- DSC worker pool zone math ---
   # Calculate workers per zone based on total replicas.
-  num_zones     = local.is_vpc && var.create_dsc_worker_pool ? var.dsc_worker_pool_zones : 0
+  # zones_list is derived first so num_zones can be capped to the number of
+  # zones that actually exist on the cluster's default pool.  This prevents an
+  # "Invalid index" error during terraform refresh/destroy when the live cluster
+  # returns fewer zones than dsc_worker_pool_zones requested at apply time.
   zones_list    = local.is_vpc && var.create_dsc_worker_pool ? [for zone in data.ibm_container_vpc_worker_pool.pool[0].zones : zone] : []
+  num_zones     = local.is_vpc && var.create_dsc_worker_pool ? min(var.dsc_worker_pool_zones, length(local.zones_list)) : 0
   base_workers  = local.num_zones > 0 ? floor(var.dsc_replicas / local.num_zones) : 0
   extra_workers = local.num_zones > 0 ? var.dsc_replicas % local.num_zones : 0
 
